@@ -46,6 +46,8 @@ One web page, **spread across both screens** — like reading a long page on a b
 
 **Support:** leave a comment on this page, or email heaps.writers_9@icloud.com.
 
+**Open source:** Duo Browser is free software under the GPL-3.0. Source code: https://github.com/littin0815/duo-browser
+
 *Retroid and Retroid Pocket are trademarks of their respective owners. Duo Browser is an independent app by CYT Workshop and is not affiliated with Retroid.*
 
 *Screenshot content: Pepper&Carrot by David Revoy (CC BY 4.0) · "Trace-based Just-in-Time Type Specialization for Dynamic Languages" (pdf.js demo document) · Alice's Adventures in Wonderland via Standard Ebooks (public domain) · Big Buck Bunny © Blender Foundation (CC BY 3.0) · Wikipedia. Websites shown are not affiliated with this app.*
@@ -93,6 +95,8 @@ One web page, **spread across both screens** — like reading a long page on a b
 - Retroid 更新韌體時，雙螢幕相關功能可能受影響，我會盡快更新 App。
 
 **問題回報**：請在本頁留言，或寄信到 heaps.writers_9@icloud.com。
+
+**開放原始碼**：雙屏瀏覽器以 GPL-3.0 授權開源，原始碼在 https://github.com/littin0815/duo-browser
 
 *Retroid 與 Retroid Pocket 為其所有者的商標。雙屏瀏覽器為 CYT Workshop 的獨立作品，與 Retroid 無關。*
 

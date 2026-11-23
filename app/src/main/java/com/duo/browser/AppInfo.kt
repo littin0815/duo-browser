@@ -8,6 +8,9 @@ object AppInfo {
     /** itch.io 商品頁網址，例如 "https://cyt.itch.io/duo-browser" */
     const val ITCH_URL = "https://cytworkshop.itch.io/duo-browser"
 
+    /** 原始碼（GitHub，GPL-3.0） */
+    const val SOURCE_URL = "https://github.com/littin0815/duo-browser"
+
     /** 客服信箱 */
     const val SUPPORT_EMAIL = "heaps.writers_9@icloud.com"
 

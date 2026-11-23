@@ -2258,9 +2258,11 @@ class BrowserUi(
         listBox.addView(head)
 
         // 聯絡與更新
-        if (AppInfo.ITCH_URL.isNotBlank() || AppInfo.SUPPORT_EMAIL.isNotBlank() || UpdateChecker.enabled) {
+        if (AppInfo.ITCH_URL.isNotBlank() || AppInfo.SOURCE_URL.isNotBlank() || AppInfo.SUPPORT_EMAIL.isNotBlank() || UpdateChecker.enabled) {
             val c = section(L.t("支援", "支持", "Support"))
             if (AppInfo.ITCH_URL.isNotBlank()) row(c, "globe", L.t("itch.io 頁面", "itch.io 页面", "itch.io page"), null, chevron = true) { openUrl(AppInfo.ITCH_URL) }
+            if (AppInfo.SOURCE_URL.isNotBlank()) row(c, "script", L.t("原始碼（GitHub）", "源代码（GitHub）", "Source code (GitHub)"),
+                L.t("GPL-3.0 開放原始碼", "GPL-3.0 开源", "Open source, GPL-3.0"), chevron = true) { openUrl(AppInfo.SOURCE_URL) }
             if (AppInfo.SUPPORT_EMAIL.isNotBlank()) row(c, "mail", L.t("聯絡客服", "联系客服", "Contact"), AppInfo.SUPPORT_EMAIL, chevron = true) { sendEmail() }
             if (UpdateChecker.enabled) row(c, "download", L.t("檢查更新", "检查更新", "Check for updates"), null) {
                 flash(L.t("檢查中…", "检查中…", "Checking…"))
