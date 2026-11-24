@@ -539,6 +539,7 @@ class Browser {
             t.compat = c
             applyUa(t.web, d, c)
         }
+        t.url = url
         t.web.loadUrl(url)
     }
 
@@ -609,11 +610,19 @@ class Browser {
      * 沒有記錄的網站一律用預設（電腦版），不會因為在某個網站切成手機版就全部變手機版。
      */
     fun setDesktop(on: Boolean) {
+        val t = tab
+        if (t.desktop == on) return
+        val w = t.web
+        val url = t.url.ifBlank { w.url }
+        val loading = w.progress < 100
         // 無痕分頁不記這個網站用哪一版（記了就留下去過這個網站的紀錄）
-        if (!tab.incognito) siteOf(tab.url.ifBlank { web.url })?.let { prefs.setSiteDesktop(it, on) }
-        tab.desktop = on
-        applyUa(web, on, tab.compat)
-        web.reload()
+        if (!t.incognito) siteOf(url)?.let { prefs.setSiteDesktop(it, on) }
+        // 載入中換 UA 會觸發 WebView 自動重載；先停下來，再用新設定開啟目標網址。
+        if (loading) w.stopLoading()
+        t.desktop = on
+        applyUa(w, on, t.compat)
+        Session.ui?.onDesktopModeChanged()
+        if (loading && !url.isNullOrBlank()) w.loadUrl(url) else w.reload()
         Session.ui?.flash(if (on) L.t("電腦版網頁", "电脑版网页", "Desktop site") else L.t("手機版網頁", "手机版网页", "Mobile site"))
     }
 

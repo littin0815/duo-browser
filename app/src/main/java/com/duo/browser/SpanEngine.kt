@@ -249,10 +249,10 @@ class SpanEngine {
         Session.invalidateScreens()
     }
 
-    // ---------------- 頁尾上推（雙屏時） ----------------
+    // ---------------- 固定頁面上推（雙屏時） ----------------
     //
     // 剛好一頁高、不能捲動的網頁（例如 Google 登入），重要內容可能正好被轉軸切成兩半。
-    // 當網頁已經不能再往下捲時，繼續往下捲就把整個網頁往上推（最多把下屏內容整個推到上屏），
+    // 在上屏往上滑可把整個網頁往上推（最多把下屏內容整個推到上屏），
     // 往回捲時先把網頁推回原位。網頁內有可捲動的區塊時不會搶它的捲動。
 
     var shift = 0f
@@ -382,12 +382,17 @@ class SpanEngine {
         }
     }
 
-    /** 手指移動 d（虛擬顯示器座標，負值=往上滑=往下捲）。回傳是否用掉了這段移動。 */
+    private fun canPushPageUp(screenY: Float): Boolean {
+        if (maxShift == 0f || viewerOnTop || screenY >= topH) return false
+        val w = currentWeb() ?: return false
+        return !w.canScrollVertically(-1) && !w.canScrollVertically(1)
+    }
+
+    /** 手指移動 d（虛擬顯示器座標，負值=往上滑=往下捲）。 */
     private fun shiftByDrag(d: Float) {
         if (mode != Mode.DUAL || d == 0f) return
-        val w = currentWeb() ?: return
         if (d < 0f) {
-            if (!w.canScrollVertically(1) && !innerScrollable) setShift(shift - d)
+            if (!innerScrollable && canPushPageUp(touchStartY)) setShift(shift - d)
         } else if (shift > 0f) {
             setShift(shift - d)
         }
@@ -696,14 +701,11 @@ class SpanEngine {
                 setShift(shift - step)
                 return
             }
-            if (v < 0f) {
-                val w = currentWeb()
-                if (w != null && !w.canScrollVertically(1)) {
-                    checkInnerScrollable(cursorX, cursorY)
-                    if (!innerScrollable) {
-                        setShift(shift + step)
-                        return
-                    }
+            if (v < 0f && canPushPageUp(cursorY)) {
+                checkInnerScrollable(cursorX, cursorY)
+                if (!innerScrollable) {
+                    setShift(shift + step)
+                    return
                 }
             }
         }

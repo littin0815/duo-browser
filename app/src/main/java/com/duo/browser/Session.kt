@@ -7,16 +7,20 @@ import android.app.ActivityOptions
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.database.ContentObserver
 import android.hardware.display.DisplayManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import android.view.Surface
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
@@ -36,6 +40,10 @@ import android.widget.EditText
 @SuppressLint("StaticFieldLeak")
 object Session {
     private const val TAG = "DuoSession"
+    private const val THOR_SCREEN_MODE = "dual_screen_display_mode"
+    private const val THOR_TOP_ONLY = 1
+    private const val THOR_BOTTOM_ONLY = 2
+    private val isThor = Build.MODEL.startsWith("AYN Thor", ignoreCase = true)
 
     lateinit var app: Context
         private set
@@ -64,6 +72,7 @@ object Session {
     var splitMode = true
         private set
     private var detected = false
+    private var restoreThorTop = false
 
     private var pendingUrl: String? = null
     private var savedTabs: Bundle? = null
@@ -86,6 +95,7 @@ object Session {
         Incognito.cleanupOnStart() // 上次留下的無痕設定檔（含 App 被關掉時還開著的無痕分頁）：資料一律不留
         engine = SpanEngine()
         gamepad = GamepadController()
+        if (isThor) observeThorDisplays()
     }
 
     // ---------------- 螢幕偵測 ----------------
@@ -100,6 +110,14 @@ object Session {
         val def = dm.getDisplay(Display.DEFAULT_DISPLAY)
         fun ok(d: Display) = d.displayId != Display.DEFAULT_DISPLAY &&
             (d.flags and Display.FLAG_PRIVATE) == 0 && d.isValid
+        if (isThor) {
+            // The built-in lower panel can have a different logical ID after a reboot.
+            val lower = dm.displays.firstOrNull { ok(it) && isThorLower(it) }
+            splitMode = false
+            topDisplay = Display.DEFAULT_DISPLAY
+            bottomDisplay = lower?.displayId ?: Display.INVALID_DISPLAY
+            return
+        }
         val other = dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).firstOrNull(::ok)
             ?: dm.displays.firstOrNull(::ok)
         if (def == null || other == null) {
@@ -113,6 +131,52 @@ object Session {
         val defIsTop = area(def) >= area(other)
         topDisplay = if (defIsTop) def.displayId else other.displayId
         bottomDisplay = if (defIsTop) other.displayId else def.displayId
+    }
+
+    private fun isThorLower(display: Display): Boolean = display.mode.let {
+        maxOf(it.physicalWidth, it.physicalHeight) == 1240 && minOf(it.physicalWidth, it.physicalHeight) == 1080
+    }
+
+    private fun thorMode(): Int {
+        if (!isThor) return 0
+        return runCatching { Settings.System.getInt(app.contentResolver, THOR_SCREEN_MODE, 0) }.getOrDefault(0)
+    }
+
+    private fun thorBottomAvailable(mode: Int): Boolean {
+        if (!isThor) return true
+        val display = app.getSystemService(DisplayManager::class.java).getDisplay(bottomDisplay)
+        return mode != THOR_TOP_ONLY && display != null && display.isValid && display.state != Display.STATE_OFF
+    }
+
+    private fun observeThorDisplays() {
+        // Thor's assistant can blank a panel without changing Display.state.
+        runCatching {
+            app.contentResolver.registerContentObserver(Settings.System.getUriFor(THOR_SCREEN_MODE), false,
+                object : ContentObserver(main) {
+                    override fun onChange(selfChange: Boolean) = scheduleLayout()
+                })
+        }.onFailure { Log.w(TAG, "Thor screen mode unavailable", it) }
+        val dm = app.getSystemService(DisplayManager::class.java)
+        dm.registerDisplayListener(object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) {
+                val display = dm.getDisplay(displayId) ?: return
+                if ((display.flags and Display.FLAG_PRIVATE) != 0 || !isThorLower(display)) return
+                detectDisplays()
+                scheduleLayout()
+            }
+
+            override fun onDisplayRemoved(displayId: Int) {
+                if (displayId != bottomDisplay) return
+                dismissBottomPresentation()
+                measured.remove(displayId)
+                detectDisplays()
+                scheduleLayout()
+            }
+
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId == bottomDisplay) scheduleLayout()
+            }
+        }, main)
     }
 
     /**
@@ -196,7 +260,11 @@ object Session {
         val d = from.displayCompat().displayId
         val fresh = screens.isEmpty()
         val bottomAct = screens[bottomDisplay]
-        if (!splitMode && !fresh && d == bottomDisplay && bottomAct != null && !bottomAct.isFinishing) {
+        val mode = thorMode()
+        if (mode == THOR_BOTTOM_ONLY && thorBottomAvailable(mode)) {
+            restoreThorTop = topDisplay !in visible
+            openScreen(from, bottomDisplay)
+        } else if (!splitMode && !fresh && d == bottomDisplay && bottomAct != null && !bottomAct.isFinishing) {
             moveToFront(bottomAct.taskId)
         } else {
             openScreen(from, topDisplay)
@@ -336,15 +404,15 @@ object Session {
     }
 
     /** 上屏回到桌面後，下屏要變成獨立的 Activity（單屏瀏覽器），不然系統會把 App 當成背景。 */
-    private fun startBottomActivity() {
+    private fun startBottomActivity(from: Context = app) {
         val now = SystemClock.uptimeMillis()
         if (now - bottomStartRequestedAt < 3000) return
         bottomStartRequestedAt = now
-        val i = Intent(app, ScreenActivity::class.java)
+        val i = Intent(from, ScreenActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
         val o = ActivityOptions.makeBasic().setLaunchDisplayId(bottomDisplay)
         try {
-            app.startActivity(i, o.toBundle())
+            from.startActivity(i, o.toBundle())
         } catch (e: Exception) {
             Log.w(TAG, "無法在下屏開啟畫面", e)
         }
@@ -384,8 +452,15 @@ object Session {
     }
 
     private fun applyLayout() {
-        val topAct = screens[topDisplay]?.takeIf { topDisplay in visible && !it.isFinishing }
+        val mode = thorMode()
+        val bottomAvailable = thorBottomAvailable(mode)
+        val visibleTop = screens[topDisplay]?.takeIf { topDisplay in visible && !it.isFinishing }
+        val topAct = visibleTop?.takeUnless { mode == THOR_BOTTOM_ONLY && bottomAvailable }
         val botAct = screens[bottomDisplay]?.takeIf { bottomDisplay in visible && !it.isFinishing }
+        if (mode != THOR_BOTTOM_ONLY && restoreThorTop && botAct != null) {
+            restoreThorTop = false
+            openScreen(botAct, topDisplay)
+        }
         val th: ScreenHost?
         var bh: ScreenHost? = null
         if (splitMode) {
@@ -393,7 +468,10 @@ object Session {
         } else {
             th = topAct?.host
             val now = SystemClock.uptimeMillis()
-            if (topAct != null) {
+            if (!bottomAvailable) {
+                dismissBottomPresentation()
+                topGoneSince = 0L
+            } else if (topAct != null) {
                 // 雙屏：下屏用 Presentation；若下屏還留著單屏用的 Activity，就收掉它
                 topGoneSince = 0L
                 if (bottomHidden) {
@@ -407,16 +485,21 @@ object Session {
                         }
                     }
                 }
-                if (bh == null && !bottomHidden) bh = botAct?.host
-            } else if (bottomPres != null && isInteractive()) {
+                if (bh == null && !bottomHidden) {
+                    bh = botAct?.host
+                    if (isThor && canPresentOnBottom() && screens[bottomDisplay] == null && bh == null) {
+                        startBottomActivity(topAct)
+                    }
+                }
+            } else if (isInteractive() && (bottomPres != null || (mode == THOR_BOTTOM_ONLY && visibleTop != null))) {
                 // 上屏不見了（回到桌面）：把下屏交給獨立的 Activity，接手後再關 Presentation
                 if (botAct != null) {
                     bh = botAct.host
                     dismissBottomPresentation()
                 } else {
-                    bh = bottomPres?.host
+                    bh = (bottomPres ?: ensureBottomPresentation())?.host
                     if (topGoneSince == 0L) topGoneSince = now
-                    if (now - topGoneSince >= 400) startBottomActivity()
+                    if (now - topGoneSince >= 400) startBottomActivity(visibleTop ?: app)
                     main.postDelayed(layoutRunnable, 450)
                 }
             } else {
@@ -516,6 +599,10 @@ object Session {
     }
 
     fun defaultCropScale(tw: Int, th: Int, bw: Int, bh: Int): Float {
+        if (isThor) {
+            // AYN specifies 6.0-inch and 3.92-inch panels. Android reports the same logical DPI for both.
+            return (hypot(1920.0, 1080.0) / 6.0 / (hypot(1240.0, 1080.0) / 3.92)).toFloat()
+        }
         val isRpDuo = maxOf(tw, th) == 1920 && minOf(tw, th) == 1080 && maxOf(bw, bh) == 1280 && minOf(bw, bh) == 960
         return if (isRpDuo) 401f / 356f else 1f
     }
@@ -571,6 +658,7 @@ object Session {
 
     private fun screenSize(top: Boolean): Pair<Int, Int> {
         measured[keyFor(top)]?.let { return it.w to it.h }
+        if (isThor) return if (top) 1920 to 1080 else 1240 to 1080
         if (!splitMode) return estimateSize(if (top) topDisplay else bottomDisplay)
         // 單螢幕手機：上 16:9、下 4:3 疊在一起（和 ScreenActivity 的分割比例一致）
         val (w, h) = estimateSize(topDisplay)
@@ -630,6 +718,7 @@ object Session {
         browser = null
         engine.release()
         paused = false
+        restoreThorTop = false
         waitSince = 0L
         autoRebuilds = 0
     }
