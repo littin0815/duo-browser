@@ -680,10 +680,25 @@ object Session {
         }
     }
 
-    /** 選單的「開啟 PDF」：用系統的檔案選擇器挑一個 PDF。 */
-    fun pickPdf() {
+    /** 本機檔案是不是 PDF（不是就當文字檔）：看類型，類型不明時看副檔名。 */
+    fun isPdfFile(uri: Uri, type: String?): Boolean {
+        val t = (type ?: runCatching { app.contentResolver.getType(uri) }.getOrNull())?.lowercase()
+        if (t != null && t.contains("pdf")) return true
+        if (t != null && (t.startsWith("text/") || t.contains("json") || t.contains("xml"))) return false
+        return uri.toString().lowercase().endsWith(".pdf") || uri.toString().lowercase().endsWith("%2epdf")
+    }
+
+    /** 開啟本機檔案（content://）：PDF 用 PDF 閱讀器，其他用文字閱讀器。 */
+    fun openFileUri(uri: Uri, type: String? = null) {
+        if (isPdfFile(uri, type)) openPdfUri(uri) else openText { TextViewer.openUri(uri) }
+    }
+
+    /** 選單的「檔案」：用系統的檔案選擇器挑一個 PDF 或文字檔。 */
+    fun pickFile() {
         val a = dialogActivity() ?: return
-        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/pdf")
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            // octet-stream：有些系統把 .md 這類檔案標成「未知類型」，不列進來就選不到（開啟時會再檢查是不是文字檔）
+            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/pdf", "text/*", "application/json", "application/xml", "application/octet-stream"))
         try {
             @Suppress("DEPRECATION")
             a.startActivityForResult(i, REQ_PDF)
@@ -694,6 +709,19 @@ object Session {
 
     /** 本機的 PDF（content://）：複製到暫存後開在新分頁。 */
     fun openPdfUri(uri: Uri) = openPdf { PdfViewer.openUri(uri) }
+
+    /** 在背景複製文字檔到暫存，完成後開在新分頁。 */
+    fun openText(open: () -> PdfViewer.Source?) {
+        val what = L.t("讀取文字檔", "读取文本文件", "Loading text file")
+        ui?.showFileProgress(what, 0, -1)
+        TextViewer.importAsync(open, { done, total -> ui?.showFileProgress(what, done, total) }) { viewer ->
+            if (viewer != null) { ui?.endFileProgress(null); openUrl(viewer); return@importAsync }
+            val msg = L.t("無法開啟這個檔案（不是文字檔，或超過 30 MB）", "无法打开这个文件（不是文本文件，或超过 30 MB）",
+                "Couldn't open this file (not a text file, or larger than 30 MB)")
+            val u = ui
+            if (u != null) u.endFileProgress(msg) else android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     /** 在背景複製 PDF 到暫存（大檔案不會卡住畫面），完成後開在新分頁。 */
     fun openPdf(open: () -> PdfViewer.Source?) {
@@ -729,7 +757,7 @@ object Session {
             return true
         }
         if (requestCode == REQ_PDF) {
-            data?.data?.takeIf { resultCode == Activity.RESULT_OK }?.let { openPdfUri(it) }
+            data?.data?.takeIf { resultCode == Activity.RESULT_OK }?.let { openFileUri(it) }
             return true
         }
         if (requestCode != REQ_FILE) return false

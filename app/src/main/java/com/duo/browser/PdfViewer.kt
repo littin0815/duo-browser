@@ -111,11 +111,11 @@ object PdfViewer {
      * 真正的複製在 [importAsync] 的背景執行緒做。讀取權限只給收到 Intent 的畫面時，
      * 要在那個畫面結束前先打開（已經打開的檔案在權限收回後仍可讀）。
      */
-    fun openUri(uri: Uri): Source? = try {
+    fun openUri(uri: Uri): Source? = if (!fileAllowed(uri)) null else try {
         val cr = Session.app.contentResolver
-        var name = "document.pdf"
-        var size = -1L
-        cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+        var name = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "document.pdf"
+        var size = if (uri.scheme == "file") uri.path?.let { File(it).length() }?.takeIf { it > 0 } ?: -1L else -1L
+        if (uri.scheme == "content") cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
             if (c.moveToFirst()) {
                 c.getString(0)?.let { name = it }
                 if (!c.isNull(1)) size = c.getLong(1)
@@ -123,6 +123,16 @@ object PdfViewer {
         }
         cr.openInputStream(uri)?.let { Source(it, name, size, idFor("$uri|$name|$size")) }
     } catch (e: Exception) { null }
+
+    /**
+     * file:// 只接受共用儲存空間（/storage、/sdcard）裡的檔案：
+     * 不然別的 App 可以傳 file:///data/data/本App/… 過來，讓本 App 把自己的 Cookie、歷史紀錄開出來。
+     */
+    fun fileAllowed(uri: Uri): Boolean {
+        if (uri.scheme != "file") return true
+        val p = try { File(uri.path ?: return false).canonicalPath } catch (e: Exception) { return false }
+        return (p.startsWith("/storage/") || p.startsWith("/sdcard/")) && !p.contains(Session.app.packageName)
+    }
 
     /** 在背景打開（[open]）並複製到暫存，完成後在主執行緒拿到閱讀器網址（失敗是 null）。 */
     fun importAsync(open: () -> Source?, onProgress: Progress, onReady: (String?) -> Unit) {

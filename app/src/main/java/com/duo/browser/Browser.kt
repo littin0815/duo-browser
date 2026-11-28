@@ -369,6 +369,7 @@ class Browser {
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? =
                 PdfViewer.intercept(request.url)
+                    ?: TextViewer.intercept(request.url)
                     ?: AdBlock.intercept(request, t.pageUrl) { t.adBlocked.incrementAndGet() }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
@@ -539,6 +540,8 @@ class Browser {
             t.compat = c
             applyUa(t.web, d, c)
         }
+        // 先記下目標網址：載入途中切換電腦版時，才知道要用新設定重開哪一頁
+        t.url = url
         t.web.loadUrl(url)
     }
 
@@ -609,11 +612,20 @@ class Browser {
      * 沒有記錄的網站一律用預設（電腦版），不會因為在某個網站切成手機版就全部變手機版。
      */
     fun setDesktop(on: Boolean) {
+        val t = tab
+        if (t.desktop == on) { Session.ui?.onDesktopModeChanged(); return }
+        val w = t.web
+        val url = t.url.ifBlank { w.url }
+        val loading = w.progress < 100
         // 無痕分頁不記這個網站用哪一版（記了就留下去過這個網站的紀錄）
-        if (!tab.incognito) siteOf(tab.url.ifBlank { web.url })?.let { prefs.setSiteDesktop(it, on) }
-        tab.desktop = on
-        applyUa(web, on, tab.compat)
-        web.reload()
+        if (!t.incognito) siteOf(url)?.let { prefs.setSiteDesktop(it, on) }
+        // 載入中換 UA 會讓 WebView 自己重載一次，再 reload 就變成連續載入兩次（而且可能是舊網址）。
+        // 所以先停下來，再用新設定直接開目標網址。（修正來自 PR #1，作者 a770931435）
+        if (loading) w.stopLoading()
+        t.desktop = on
+        applyUa(w, on, t.compat)
+        Session.ui?.onDesktopModeChanged()
+        if (loading && !url.isNullOrBlank()) w.loadUrl(url) else w.reload()
         Session.ui?.flash(if (on) L.t("電腦版網頁", "电脑版网页", "Desktop site") else L.t("手機版網頁", "手机版网页", "Mobile site"))
     }
 
@@ -868,7 +880,7 @@ class Browser {
 
         /** 電腦版時要強制的版面寬度（CSS px），0 = 不強制。網頁在載入最開頭就會呼叫。 */
         @JavascriptInterface
-        fun desktopWidth(): Int = if (t.desktop && !PdfViewer.isViewerUrl(t.pageUrl)) prefs.desktopWidth else 0 // PDF 閱讀器（pdf.js）用原本的寬度
+        fun desktopWidth(): Int = if (t.desktop && !PdfViewer.isViewerUrl(t.pageUrl) && !TextViewer.isViewerUrl(t.pageUrl)) prefs.desktopWidth else 0 // PDF／文字閱讀器用原本的寬度
 
         @JavascriptInterface
         fun compat(): Boolean = t.compat

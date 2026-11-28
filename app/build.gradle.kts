@@ -22,8 +22,8 @@ android {
         // 刻意停在 35：targetSdk 36 會強制啟用預測式返回，實體 B 鍵/返回鍵就收不到 KEYCODE_BACK
         // （在 itch.io 自行發行，不受 Google Play 的 targetSdk 規定限制）
         targetSdk = 35
-        versionCode = 210
-        versionName = "2.1.0"
+        versionCode = 220
+        versionName = "2.2.0"
     }
 
     signingConfigs {

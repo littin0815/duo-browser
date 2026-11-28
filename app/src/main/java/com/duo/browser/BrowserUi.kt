@@ -148,6 +148,9 @@ class BrowserUi(
 
     private var scrollToMode = false
 
+    /** 設定頁「這個網站用電腦版」的開關；不在設定頁時是 null。 */
+    private var desktopModeToggle: ToggleView? = null
+
     // ---- 頁籤（分頁／書籤／歷史／設定），選到的那個底下有一塊會滑動的亮色塊 ----
     private val segFrame = FrameLayout(ctx)
     private val segIndicator = View(ctx).apply { background = ShellDrawable(density, T.ACCENT, 999f) }
@@ -423,9 +426,9 @@ class BrowserUi(
         })
         // 無痕分頁：不記歷史，Cookie／登入和一般分頁分開，關掉就全部清除
         row2.addView(iconBtn("incognito", L.t("新無痕分頁", "新无痕标签页", "New incognito tab")) { newIncognitoTab() })
-        // PDF 圖示單獨看不出意思，加上文字
-        row2.addView(btn("PDF", icon = "pdf") { closeAll(); Session.pickPdf() }.apply {
-            contentDescription = L.t("開啟 PDF", "打开 PDF", "Open PDF")
+        // 開啟本機檔案（PDF、文字檔）：圖示單獨看不出意思，加上文字
+        row2.addView(btn(L.t("檔案", "文件", "File"), icon = "pdf") { closeAll(); Session.pickFile() }.apply {
+            contentDescription = L.t("開啟 PDF 或文字檔", "打开 PDF 或文本文件", "Open a PDF or text file")
             minimumHeight = dp(48); minHeight = dp(48)
         })
         panel.addView(row2)
@@ -803,6 +806,14 @@ class BrowserUi(
         urlEdit.text = shown
         refreshIncognitoLook()
         refreshBookmarkState()
+        onDesktopModeChanged()
+    }
+
+    /** 目前網頁換成電腦版／手機版（或換頁、換分頁）後，讓設定頁的開關跟上。 */
+    fun onDesktopModeChanged() {
+        val toggle = desktopModeToggle ?: return
+        val on = Session.browser?.isDesktop ?: return
+        if (toggle.on != on) toggle.animateTo(on)
     }
 
     private val curIncognito: Boolean get() = Session.browser?.let { it.tabs.isNotEmpty() && it.tab.incognito } == true
@@ -1250,6 +1261,7 @@ class BrowserUi(
     /** 換頁：清空清單、切頁籤、捲到頂端。 */
     private fun beginPage(mode: ListMode, seg: Int) {
         listMode = mode
+        desktopModeToggle = null
         listBox.removeAllViews()
         setSegment(seg)
         scrollListToTop()
@@ -1358,6 +1370,11 @@ class BrowserUi(
                 scaleType = ImageView.ScaleType.CENTER
                 background = ShellDrawable(density, 0xFFD9534F.toInt(), 8f) // PDF 慣用的紅色
             }
+            TextViewer.isViewerUrl(url) -> ImageView(ctx).apply {
+                setImageDrawable(Icon("pdf", 0xFFFFFFFF.toInt(), dp(17)))
+                scaleType = ImageView.ScaleType.CENTER
+                background = ShellDrawable(density, 0xFF5B7BD5.toInt(), 8f) // 文字檔用藍色，和 PDF 分得開
+            }
             fav != null -> ImageView(ctx).apply {
                 setImageBitmap(fav)
                 scaleType = ImageView.ScaleType.FIT_CENTER
@@ -1379,9 +1396,16 @@ class BrowserUi(
 
     /** 分頁的網域那一行：PDF 顯示「PDF」，本機頁面（about:blank）不顯示網址。 */
     private fun tabWhere(t: Tab): String {
-        val where = if (PdfViewer.isViewerUrl(t.url)) "PDF"
-        else hostOf(t.url).ifEmpty { t.url.takeUnless { it == "about:blank" || it.startsWith("data:") }.orEmpty() }
+        val where = docLabel(t.url)
+            ?: hostOf(t.url).ifEmpty { t.url.takeUnless { it == "about:blank" || it.startsWith("data:") }.orEmpty() }
         return if (t.incognito) L.t("無痕", "无痕", "Incognito") + (if (where.isNotEmpty()) " · $where" else "") else where
+    }
+
+    /** 內建閱讀器的網址：網域那一行顯示「PDF」／「文字檔」；一般網頁是 null。 */
+    private fun docLabel(url: String?): String? = when {
+        PdfViewer.isViewerUrl(url) -> "PDF"
+        TextViewer.isViewerUrl(url) -> L.t("文字檔", "文本文件", "Text")
+        else -> null
     }
 
     /** 分頁標題：標題本身是網址時只顯示網域；PDF 還沒讀到標題時用檔名。 */
@@ -1436,6 +1460,7 @@ class BrowserUi(
             val kind = when {
                 t.incognito -> "inc"
                 PdfViewer.isViewerUrl(t.url) -> "pdf"
+                TextViewer.isViewerUrl(t.url) -> "txt"
                 Favicons.get(t.url) != null -> "fav:" + hostOf(t.url)
                 else -> "letter:" + hostOf(t.url) + t.label.take(1)
             }
@@ -1659,7 +1684,7 @@ class BrowserUi(
             Motion.polish(this)
         }
         val badge = siteBadge(bm.url, bm.title, false)
-        val where = if (PdfViewer.isViewerUrl(bm.url)) "PDF" else hostOf(bm.url)
+        val where = docLabel(bm.url) ?: hostOf(bm.url)
         val whereView = TextView(ctx).apply {
             text = where; textSize = 12f; setTextColor(T.TEXT3); isSingleLine = true; ellipsize = TextUtils.TruncateAt.END
         }
@@ -1734,11 +1759,11 @@ class BrowserUi(
                     else -> day
                 }, trailing = if (first) clearBtn else null)
             }
-            val isPdf = PdfViewer.isViewerUrl(e.url)
-            val host = if (isPdf) "PDF" else hostOf(e.url)
+            val doc = docLabel(e.url)
+            val host = doc ?: hostOf(e.url)
             val title = e.title.takeUnless { it.isBlank() || it == "PDF.js viewer" }
-                ?: (if (isPdf) Uri.parse(e.url).getQueryParameter("name") else null) ?: e.url
-            row(c!!, if (isPdf) "pdf" else null, title,
+                ?: (if (doc != null) Uri.parse(e.url).getQueryParameter("name") else null) ?: e.url
+            row(c!!, if (doc != null) "pdf" else null, title,
                 timeFmt.format(java.util.Date(e.time)) + if (host.isNotEmpty()) "  ·  $host" else "",
                 trailing = iconBtn("close", L.t("刪除這筆", "删除这条", "Remove"), sizeDp = 38, iconDp = 18, quiet = true) {
                     History.remove(e); showHistory(limit)
@@ -1897,9 +1922,11 @@ class BrowserUi(
                 if (panel.visibility == View.VISIBLE && listMode == ListMode.SETTINGS) showSettings()
             }
         })
-        val desk = Session.browser?.isDesktop ?: p.desktop
-        toggleRow(gen, "desktop", L.t("這個網站用電腦版", "这个网站用电脑版", "Desktop site here"),
-            L.t("每個網站分開記住", "每个网站分开记住", "Remembered per site"), desk) {
+        // 不用 toggleRow：它按一次就鎖住（busy），而且開關要跟著目前網頁的實際狀態走
+        val deskToggle = ToggleView(ctx, Session.browser?.isDesktop ?: p.desktop)
+        desktopModeToggle = deskToggle
+        row(gen, "desktop", L.t("這個網站用電腦版", "这个网站用电脑版", "Desktop site here"),
+            L.t("每個網站分開記住", "每个网站分开记住", "Remembered per site"), trailing = deskToggle) {
             Session.browser?.let { it.setDesktop(!it.isDesktop) }
         }
         valueRow(gen, "width", L.t("電腦版版面寬度", "电脑版页面宽度", "Desktop layout width"), null, { "${p.desktopWidth}px" },

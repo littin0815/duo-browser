@@ -38,7 +38,7 @@ object History {
     private fun recordable(url: String): Boolean =
         (url.startsWith("http://") || url.startsWith("https://")) &&
             // App 內部頁面不記，但 PDF 閱讀器要記（看過的 PDF 也要出現在歷史紀錄）
-            (!url.startsWith("https://appassets.androidplatform.net/") || PdfViewer.isViewerUrl(url))
+            (!url.startsWith("https://appassets.androidplatform.net/") || PdfViewer.isViewerUrl(url) || TextViewer.isViewerUrl(url))
 
     /** 造訪了一個網址（包含 YouTube 這類網頁內換頁）。 */
     fun record(url: String?, title: String?) {

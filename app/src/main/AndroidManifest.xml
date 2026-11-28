@@ -32,12 +32,46 @@
                 <data android:scheme="http" />
                 <data android:scheme="https" />
             </intent-filter>
-            <!-- 從檔案管理員用「雙屏瀏覽器」開啟 PDF -->
+            <!-- 從檔案管理員用「雙屏瀏覽器」開啟 PDF／文字檔。
+                 file：百度網盤這類 App 用 file:// 路徑找「可以開這個檔案的 App」，沒登記就不會出現在它的清單 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" />
+                <data android:scheme="file" />
                 <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/x-pdf" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/comma-separated-values" />
+                <data android:mimeType="text/x-log" />
+                <data android:mimeType="application/json" />
+            </intent-filter>
+            <!-- 有些檔案管理員不給類型（application/octet-stream 或 */*）：用副檔名認。
+                 pathPattern 的 .* 不會跨過前面的點，所以多寫幾個點數的版本 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.pdf" />
+                <data android:pathPattern=".*\\..*\\.pdf" />
+                <data android:pathPattern=".*\\..*\\..*\\.pdf" />
+                <data android:pathPattern=".*\\.PDF" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\..*\\.txt" />
+                <data android:pathPattern=".*\\..*\\..*\\.txt" />
+                <data android:pathPattern=".*\\.TXT" />
+                <data android:pathPattern=".*\\.md" />
+                <data android:pathPattern=".*\\..*\\.md" />
+                <data android:pathPattern=".*\\..*\\..*\\.md" />
+                <data android:pathPattern=".*\\.MD" />
+                <data android:pathPattern=".*\\.markdown" />
             </intent-filter>
         </activity>
 
